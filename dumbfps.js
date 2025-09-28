@@ -146,7 +146,8 @@ var npcTemplates = [
             "pay rent in vibes",
             "this economy is a horror map",
             "our budget doom slaps"
-        ]
+        ],
+        sprite: "sample_creature"
     },
     {
         name: "Gamer Mold",
@@ -158,7 +159,8 @@ var npcTemplates = [
             "touch grass.exe failed",
             "i run on gamer Gatorade",
             "wallpaper by mildew"
-        ]
+        ],
+        sprite: "sample_creature"
     },
     {
         name: "Crypto Skunk",
@@ -170,7 +172,8 @@ var npcTemplates = [
             "hodl my deodorant",
             "sniff the blockchain",
             "gas fees? that's me"
-        ]
+        ],
+        sprite: "sample_creature"
     }
 ];
 
@@ -205,6 +208,8 @@ var gameConfig = {
 };
 gameConfig.npcCount = clampNPCCount(gameConfig.npcCount);
 var activeGamesCache = { entries: [], timestamp: 0 };
+
+loadSpriteDefinitions();
 
 var multiplayerAvailable = (mpModule && typeof mpModule.createMultiplayerClient === "function");
 var multiplayer = multiplayerAvailable
@@ -247,6 +252,9 @@ function cloneTemplate(tpl) {
     copy.heading = Math.random() * Math.PI * 2;
     copy.hp = tpl.maxHp || 5;
     copy.maxHp = tpl.maxHp || 5;
+    var spriteId = tpl.sprite || (defaultSpriteDef ? defaultSpriteDef.id : null);
+    copy.spriteId = spriteId;
+    copy.spriteDef = (spriteId && spriteDefinitions[spriteId]) ? spriteDefinitions[spriteId] : defaultSpriteDef;
     return copy;
 }
 
@@ -311,6 +319,185 @@ var statusText = statusPhrases[0];
 var rows = [];
 var colorRows = [];
 var remoteDebugTimer = 0;
+var spriteDefinitions = {};
+var defaultSpriteDef = null;
+
+var ansiFgMap = null;
+var ansiBgMap = null;
+var ansiAttrCache = null;
+
+function pathBaseName(path) {
+    return path.replace(/^.*[\\\/]([^\\\/]+)$/, "$1");
+}
+
+function checkAccessRequirements() {
+    return true;
+}
+
+function sanitizeSpriteId(id) {
+    if (!id) {
+        return null;
+    }
+    var cleaned = id.replace(/[^a-zA-Z0-9_\-]/g, '_').replace(/__+/g, '_');
+    if (!cleaned.length) {
+        return null;
+    }
+    return cleaned.toLowerCase();
+}
+
+function bootstrapSpriteTemplate() {
+    if (!checkAccessRequirements()) {
+        debugLog("Sprite template request denied: access requirements not met");
+        menuError("You do not have permission to create templates.");
+        return;
+    }
+
+    var spriteDir = js.exec_dir + "sprites/";
+    if (!file_isdir(spriteDir)) {
+        if (!mkdir(spriteDir)) {
+            menuError("Could not create sprites directory.");
+            return;
+        }
+    }
+
+    var desiredId = promptInput("Sprite ID", "sample_creature", 40);
+    if (desiredId === undefined) {
+        menuNotice("Template creation cancelled.");
+        return;
+    }
+    var templateId = sanitizeSpriteId(desiredId);
+    if (!templateId) {
+        menuError("Invalid sprite ID.");
+        return;
+    }
+    var ansPath = spriteDir + templateId + ".ans";
+    if (file_exists(ansPath)) {
+        var backup = ansPath.replace(/\.(ans)$/i, ".bak");
+        if (file_exists(backup)) {
+            file_remove(backup);
+        }
+        if (file_rename(ansPath, backup)) {
+            debugLog("Existing sprite template moved to " + backup);
+        }
+    }
+
+    var width = 80;
+    var height = 25;
+    var chars = new Array(height);
+    var attrs = new Array(height);
+    for (var y = 0; y < height; y++) {
+        chars[y] = new Array(width);
+        attrs[y] = new Array(width);
+        for (var x = 0; x < width; x++) {
+            chars[y][x] = 32; // space
+            attrs[y][x] = 7;  // light grey on black
+        }
+    }
+
+    function setText(x, y, text, attr) {
+        if (y < 0 || y >= height) {
+            return;
+        }
+        for (var i = 0; i < text.length; i++) {
+            var cx = x + i;
+            if (cx < 0 || cx >= width) {
+                continue;
+            }
+            chars[y][cx] = text.charCodeAt(i);
+            attrs[y][cx] = attr;
+        }
+    }
+
+    function drawBox(x, y, innerW, innerH, attr) {
+        var tl = 218, tr = 191, bl = 192, br = 217, h = 196, v = 179;
+        setChar(x, y, tl, attr);
+        for (var ix = 1; ix <= innerW; ix++) {
+            setChar(x + ix, y, h, attr);
+        }
+        setChar(x + innerW + 1, y, tr, attr);
+        for (var iy = 1; iy <= innerH; iy++) {
+            setChar(x, y + iy, v, attr);
+            setChar(x + innerW + 1, y + iy, v, attr);
+        }
+        setChar(x, y + innerH + 1, bl, attr);
+        for (var ix2 = 1; ix2 <= innerW; ix2++) {
+            setChar(x + ix2, y + innerH + 1, h, attr);
+        }
+        setChar(x + innerW + 1, y + innerH + 1, br, attr);
+    }
+
+    function setChar(x, y, code, attr) {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            return;
+        }
+        chars[y][x] = code;
+        attrs[y][x] = attr;
+    }
+
+    function fillRegion(x, y, w, h, code, attr) {
+        for (var iy = 0; iy < h; iy++) {
+            for (var ix = 0; ix < w; ix++) {
+                setChar(x + ix, y + iy, code, attr);
+            }
+        }
+    }
+
+    setText(0, 0, "; id=" + templateId, 14);
+    setText(0, 1, "; mask=1 solid, 0 empty", 14);
+    setText(0, 2, "; frame small art 2 4 16 6", 14);
+    setText(42, 2, "; frame small mask 42 4 16 6", 14);
+    setText(0, 3, "; frame medium art 2 13 24 10", 14);
+    setText(42, 3, "; frame medium mask 42 13 24 10", 14);
+
+    drawBox(1, 4, 16, 6, 10);
+    fillRegion(2, 5, 16, 6, 32, 8);
+    drawBox(41, 4, 16, 6, 10);
+    fillRegion(42, 5, 16, 6, 48, 8);
+
+    drawBox(1, 13, 24, 10, 11);
+    fillRegion(2, 14, 24, 10, 32, 8);
+    drawBox(41, 13, 24, 10, 11);
+    fillRegion(42, 14, 24, 10, 48, 8);
+
+    var out = new File(ansPath);
+    if (!out.open("w")) {
+        menuError("Failed to write template ANSI.");
+        return;
+    }
+    var reset = "\x1b[0m";
+    for (var yy = 0; yy < height; yy++) {
+        var currentAttr = null;
+        var line = "";
+        for (var xx = 0; xx < width; xx++) {
+            var attr = attrs[yy][xx];
+            if (currentAttr !== attr) {
+                currentAttr = attr;
+                line += attrToAnsi(attr);
+            }
+            line += String.fromCharCode(chars[yy][xx]);
+        }
+        line += reset;
+        out.writeln(line);
+    }
+    out.close();
+
+    var tipsPath = spriteDir + "README.txt";
+    if (!file_exists(tipsPath)) {
+        var tips = new File(tipsPath);
+        if (tips.open("w")) {
+            tips.writeln("DUMBFPS Sprite Templates (.ans)");
+            tips.writeln("--------------------------------");
+            tips.writeln("This toolkit creates ANSI templates (80 columns). Edit in an ANSI editor.");
+            tips.writeln("When finished, SAVE/EXPORT as .bin (CP437) before deploying.");
+            tips.writeln("Metadata lines (`; frame ...`) list X/Y/Width/Height for art and mask boxes.");
+            tips.writeln("Left column = art, right column = mask. Use '1' for solid, '0' for empty.");
+            tips.close();
+        }
+    }
+
+    menuNotice("Created sprites/" + templateId + ".ans. Edit, then save as .bin before use.");
+    debugLog("Sprite template generated at " + ansPath);
+}
 
 function debugLog(message) {
     if (typeof log === "function") {
@@ -318,6 +505,237 @@ function debugLog(message) {
             log("[DUMBFPS] " + message);
         } catch (ignore) { }
     }
+}
+
+function loadSpriteDefinitions() {
+    spriteDefinitions = {};
+    defaultSpriteDef = null;
+    var files = directory(js.exec_dir + "sprites/*.bin");
+    if (!files || !files.length) {
+        debugLog("No sprite .bin files found");
+        return;
+    }
+    var loaded = 0;
+    for (var i = 0; i < files.length; i++) {
+        var path = files[i];
+        var def = parseSpriteBin(path);
+        if (!def) {
+            continue;
+        }
+        spriteDefinitions[def.id] = def;
+        if (!defaultSpriteDef) {
+            defaultSpriteDef = def;
+        }
+        loaded++;
+    }
+    debugLog("Loaded " + loaded + " sprite definition(s)");
+}
+
+function parseSpriteBin(path) {
+    var f = new File(path);
+    if (!f.open("rb")) {
+        debugLog("Unable to open sprite bin: " + path);
+        return null;
+    }
+    var data = f.read();
+    f.close();
+    if (!data) {
+        debugLog("Empty sprite bin: " + path);
+        return null;
+    }
+    if (data.length >= 128 && data.substr(data.length - 128, 5) === "SAUCE") {
+        data = data.substr(0, data.length - 128);
+    }
+    var bytes = data.split("");
+    var totalPairs = bytes.length / 2;
+    var width = 80;
+    var height = Math.floor(totalPairs / width);
+    if (width * height * 2 !== bytes.length) {
+        debugLog("Unexpected sprite bin dimensions for " + path);
+        return null;
+    }
+    var chars = new Array(height);
+    var attrs = new Array(height);
+    var idx = 0;
+    for (var y = 0; y < height; y++) {
+        chars[y] = new Array(width);
+        attrs[y] = new Array(width);
+        for (var x = 0; x < width; x++) {
+            chars[y][x] = bytes[idx++].charCodeAt(0);
+            attrs[y][x] = bytes[idx++].charCodeAt(0);
+        }
+    }
+
+    var id = null;
+    var frameMeta = {};
+    var paletteMeta = {};
+
+    function rtrim(str) {
+        return str.replace(/\s+$/, "");
+    }
+
+    for (var row = 0; row < height; row++) {
+        var line = "";
+        for (var col = 0; col < width; col++) {
+            line += String.fromCharCode(chars[row][col]);
+        }
+        line = rtrim(line);
+        if (!line.length || line.charAt(0) !== ';') {
+            continue;
+        }
+        var body = line.substr(1).trim();
+        if (!body.length) {
+            continue;
+        }
+        if (body.indexOf('frame') === 0) {
+            var parts = body.split(/\s+/);
+            if (parts.length >= 7) {
+                var frameName = parts[1];
+                var entryType = parts[2];
+                var fx = parseInt(parts[3], 10);
+                var fy = parseInt(parts[4], 10);
+                var fw = parseInt(parts[5], 10);
+                var fh = parseInt(parts[6], 10);
+                if (!isNaN(fx) && !isNaN(fy) && !isNaN(fw) && !isNaN(fh)) {
+                    if (!frameMeta[frameName]) {
+                        frameMeta[frameName] = {};
+                    }
+                    frameMeta[frameName][entryType] = {
+                        x: fx,
+                        y: fy,
+                        width: fw,
+                        height: fh
+                    };
+                }
+            }
+            continue;
+        }
+        if (body.indexOf('=') !== -1) {
+            var eq = body.indexOf('=');
+            var key = body.substr(0, eq).trim();
+            var value = body.substr(eq + 1).trim();
+            if (key === 'id') {
+                id = value;
+            } else if (key.indexOf('palette.') === 0) {
+                paletteMeta[key.substr('palette.'.length)] = value;
+            }
+        }
+    }
+
+    if (!id) {
+        id = pathBaseName(path).replace(/\.bin$/i, "");
+    }
+
+    var def = {
+        id: id,
+        source: path,
+        palette: paletteMeta,
+        frames: {},
+        frameList: []
+    };
+
+    function extractArt(region) {
+        var art = {
+            width: region.width,
+            height: region.height,
+            cells: []
+        };
+        for (var ry = 0; ry < region.height; ry++) {
+            var rowCells = [];
+            for (var rx = 0; rx < region.width; rx++) {
+                var cy = region.y + ry;
+                var cx = region.x + rx;
+                var ch = String.fromCharCode(chars[cy][cx]);
+                var attr = attrs[cy][cx];
+                rowCells.push({
+                    ch: ch,
+                    attr: attr,
+                    ansi: attrToAnsi(attr)
+                });
+            }
+            art.cells.push(rowCells);
+        }
+        return art;
+    }
+
+    function extractMask(region) {
+        var mask = [];
+        for (var ry = 0; ry < region.height; ry++) {
+            var rowMask = [];
+            for (var rx = 0; rx < region.width; rx++) {
+                var cy = region.y + ry;
+                var cx = region.x + rx;
+                var ch = String.fromCharCode(chars[cy][cx]);
+                rowMask.push(ch === '1');
+            }
+            mask.push(rowMask);
+        }
+        return mask;
+    }
+
+    for (var frameName in frameMeta) {
+        if (!frameMeta.hasOwnProperty(frameName)) {
+            continue;
+        }
+        var meta = frameMeta[frameName];
+        var frame = { name: frameName };
+        if (meta.art) {
+            frame.art = extractArt(meta.art);
+            frame.width = meta.art.width;
+            frame.height = meta.art.height;
+        }
+        if (meta.mask) {
+            frame.mask = extractMask(meta.mask);
+        }
+        if (!frame.art) {
+            debugLog("Sprite frame '" + frameName + "' in " + path + " lacks art region");
+            continue;
+        }
+        def.frames[frameName] = frame;
+        def.frameList.push(frame);
+    }
+
+    if (!def.frameList.length) {
+        debugLog("Sprite '" + def.id + "' has no usable frames");
+        return null;
+    }
+
+    return def;
+}
+function attrToAnsi(attr) {
+    if (typeof ansiAttrCache === "undefined" || ansiAttrCache === null) {
+        ansiAttrCache = {};
+    }
+    if (typeof ansiFgMap === "undefined" || ansiFgMap === null) {
+        ansiFgMap = [
+            "\x1b[30m", "\x1b[34m", "\x1b[32m", "\x1b[36m",
+            "\x1b[31m", "\x1b[35m", "\x1b[33m", "\x1b[37m",
+            "\x1b[90m", "\x1b[94m", "\x1b[92m", "\x1b[96m",
+            "\x1b[91m", "\x1b[95m", "\x1b[93m", "\x1b[97m"
+        ];
+    }
+    if (typeof ansiBgMap === "undefined" || ansiBgMap === null) {
+        ansiBgMap = [
+            "\x1b[40m", "\x1b[44m", "\x1b[42m", "\x1b[46m",
+            "\x1b[41m", "\x1b[45m", "\x1b[43m", "\x1b[47m",
+            "\x1b[100m", "\x1b[104m", "\x1b[102m", "\x1b[106m",
+            "\x1b[101m", "\x1b[105m", "\x1b[103m", "\x1b[107m"
+        ];
+    }
+    if (ansiAttrCache[attr] !== undefined) {
+        return ansiAttrCache[attr];
+    }
+    var fg = attr & 0x0f;
+    var bg = (attr >> 4) & 0x0f;
+    var seq = "";
+    if (bg >= 0 && bg < ansiBgMap.length) {
+        seq += ansiBgMap[bg];
+    }
+    if (fg >= 0 && fg < ansiFgMap.length) {
+        seq += ansiFgMap[fg];
+    }
+    ansiAttrCache[attr] = seq;
+    return seq;
 }
 
 function normalizeAngle(a) {
@@ -723,18 +1141,21 @@ function renderFrame() {
         }
         var drawStartX = Math.floor(spriteScreenX - spriteWidth / 2);
         var drawEndX = Math.floor(spriteScreenX + spriteWidth / 2);
-        for (var stripe = drawStartX; stripe <= drawEndX; stripe++) {
-            if (stripe < 0 || stripe >= VIEW_WIDTH) {
-                continue;
-            }
-            if (depth[stripe] < distance) {
-                continue;
-            }
-            var bodyChar = npc.char;
-            var bodyColor = npc.color;
-            for (var spriteY = drawStartY; spriteY <= drawEndY; spriteY++) {
-                rows[spriteY][stripe] = bodyChar;
-                colorRows[spriteY][stripe] = bodyColor;
+        var drewSprite = drawSpriteFrameToBuffer(npc.spriteDef, depth, drawStartX, drawEndX, drawStartY, drawEndY, distance);
+        if (!drewSprite) {
+            for (var stripe = drawStartX; stripe <= drawEndX; stripe++) {
+                if (stripe < 0 || stripe >= VIEW_WIDTH) {
+                    continue;
+                }
+                if (depth[stripe] < distance) {
+                    continue;
+                }
+                var fallbackChar = npc.char;
+                var fallbackColor = npc.color;
+                for (var spriteY = drawStartY; spriteY <= drawEndY; spriteY++) {
+                    rows[spriteY][stripe] = fallbackChar;
+                    colorRows[spriteY][stripe] = fallbackColor;
+                }
             }
         }
         drawNPCOverlay(drawStartX, drawEndX, drawStartY, drawEndY, npc);
@@ -790,6 +1211,7 @@ function renderRemotePlayers(depth, centerY) {
     if (!multiplayer || !multiplayer.remoteEntries) {
         return;
     }
+    var remoteSprite = spriteDefinitions.player || defaultSpriteDef;
     for (var i = 0; i < multiplayer.remoteEntries.length; i++) {
         var entry = multiplayer.remoteEntries[i];
         if (!entry) {
@@ -830,16 +1252,19 @@ function renderRemotePlayers(depth, centerY) {
         }
         var drawStartX = Math.floor(spriteScreenX - spriteWidth / 2);
         var drawEndX = Math.floor(spriteScreenX + spriteWidth / 2);
-        for (var stripe = drawStartX; stripe <= drawEndX; stripe++) {
-            if (stripe < 0 || stripe >= VIEW_WIDTH) {
-                continue;
-            }
-            if (depth[stripe] < distance) {
-                continue;
-            }
-            for (var spriteY = drawStartY; spriteY <= drawEndY; spriteY++) {
-                rows[spriteY][stripe] = '@';
-                colorRows[spriteY][stripe] = "\x1b[94;1m";
+        var drewRemote = drawSpriteFrameToBuffer(remoteSprite, depth, drawStartX, drawEndX, drawStartY, drawEndY, distance);
+        if (!drewRemote) {
+            for (var stripe = drawStartX; stripe <= drawEndX; stripe++) {
+                if (stripe < 0 || stripe >= VIEW_WIDTH) {
+                    continue;
+                }
+                if (depth[stripe] < distance) {
+                    continue;
+                }
+                for (var spriteY = drawStartY; spriteY <= drawEndY; spriteY++) {
+                    rows[spriteY][stripe] = '@';
+                    colorRows[spriteY][stripe] = "\x1b[94;1m";
+                }
             }
         }
         drawNPCOverlay(drawStartX, drawEndX, drawStartY, drawEndY, {
@@ -895,6 +1320,79 @@ function adjustTilt(step) {
     } else if (viewTilt < -MAX_TILT) {
         viewTilt = -MAX_TILT;
     }
+}
+
+function selectSpriteFrame(def, projectedHeight) {
+    if (!def || !def.frameList || !def.frameList.length) {
+        return null;
+    }
+    var best = null;
+    var bestDelta = Infinity;
+    for (var i = 0; i < def.frameList.length; i++) {
+        var frame = def.frameList[i];
+        if (!frame || !frame.art) {
+            continue;
+        }
+        var delta = Math.abs(frame.art.height - projectedHeight);
+        if (delta < bestDelta) {
+            best = frame;
+            bestDelta = delta;
+        }
+    }
+    return best || def.frameList[0];
+}
+
+function drawSpriteFrameToBuffer(def, depthBuffer, drawStartX, drawEndX, drawStartY, drawEndY, distance) {
+    var height = drawEndY - drawStartY + 1;
+    var width = drawEndX - drawStartX + 1;
+    if (height <= 0 || width <= 0) {
+        return false;
+    }
+    var frame = selectSpriteFrame(def, height);
+    if (!frame || !frame.art) {
+        return false;
+    }
+    var art = frame.art;
+    var mask = frame.mask;
+
+    for (var stripe = drawStartX; stripe <= drawEndX; stripe++) {
+        if (stripe < 0 || stripe >= VIEW_WIDTH) {
+            continue;
+        }
+        if (depthBuffer[stripe] < distance) {
+            continue;
+        }
+        var relX = (stripe - drawStartX + 0.5) / width;
+        var artX = Math.floor(relX * art.width);
+        if (artX < 0 || artX >= art.width) {
+            continue;
+        }
+        for (var outY = drawStartY; outY <= drawEndY; outY++) {
+            if (outY < 0 || outY >= VIEW_HEIGHT) {
+                continue;
+            }
+            var relY = (outY - drawStartY + 0.5) / height;
+            var artY = Math.floor(relY * art.height);
+            if (artY < 0 || artY >= art.height) {
+                continue;
+            }
+            if (mask) {
+                if (!mask[artY] || !mask[artY][artX]) {
+                    continue;
+                }
+            }
+            var cell = art.cells[artY][artX];
+            if (!cell) {
+                continue;
+            }
+            if (cell.ch === ' ' && (!mask || !mask[artY][artX])) {
+                continue;
+            }
+            rows[outY][stripe] = cell.ch;
+            colorRows[outY][stripe] = cell.ansi;
+        }
+    }
+    return true;
 }
 
 function buildColoredLine(chars, colors) {
@@ -1129,9 +1627,9 @@ function runGame(config) {
                         var age = entry.ts ? (Date.now() - entry.ts) : 0;
                         summaries.push((entry.alias || "?") + " x=" + (typeof entry.x === "number" ? entry.x.toFixed(2) : "?") + " y=" + (typeof entry.y === "number" ? entry.y.toFixed(2) : "?") + " age=" + Math.round(age) + "ms");
                     }
-                    debugLog("Remote state sample: " + summaries.join(" | "));
+                    //debugLog("Remote state sample: " + summaries.join(" | "));
                 } else {
-                    debugLog("Remote state sample: none");
+                    // debugLog("Remote state sample: none");
                 }
             }
 
@@ -1585,6 +2083,11 @@ function menuError(message) {
     mswait(800);
 }
 
+function menuNotice(message) {
+    console.print("\1n" + message + "\r\n");
+    mswait(800);
+}
+
 function showMenu(config) {
     var menuItems = [
         {
@@ -1632,7 +2135,20 @@ function showMenu(config) {
                     return "start";
                 }
             }
-        },
+        }
+    ];
+
+    if (checkAccessRequirements()) {
+        menuItems.push({
+            id: "template",
+            label: "Sprite ~T~emplate Toolkit",
+            handler: function () {
+                bootstrapSpriteTemplate();
+            }
+        });
+    }
+
+    Array.prototype.push.apply(menuItems, [
         {
             id: "widescreen",
             label: function () {
@@ -1692,7 +2208,7 @@ function showMenu(config) {
                 return "quit";
             }
         }
-    ];
+    ]);
 
     function resolveLabel(item) {
         if (typeof item.label === "function") {
